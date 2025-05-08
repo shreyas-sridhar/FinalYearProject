@@ -1,15 +1,43 @@
-# app.py
-from flask import Flask, render_template, request, redirect, url_for, flash, session
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
-import qrcode
-import io
-import base64
+import requests
+import time
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your_secret_key_here'  # Change this in production
+app.config['SECRET_KEY'] = 'your_secret_key_here'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///ambulance.db'
 db = SQLAlchemy(app)
+
+# Mappls API credentials
+MAPPLS_CLIENT_ID = "96dHZVzsAut3ZnWxGN7Lm3B6i8IRC2Np5LbON8tlXDldDFKctykbSWqRno-N_HXyHU1mUZ-MUVLaUp-5nc5aEg=="
+MAPPLS_CLIENT_SECRET = "lrFxI-iSEg_4M2nq1EpF0nl7fogCpyWBcz2YurJXC_WtcurKE4kW7p47lgkVPKQ9HlMd1KYuqO6Y8D9xoI9VvKn-iJj255K1"
+MAPPLS_TOKEN_URL = "https://outpost.mappls.com/api/security/oauth/token"
+
+# Token cache
+mappls_token = None
+mappls_token_expiry = 0
+
+def get_mappls_token():
+    global mappls_token, mappls_token_expiry
+
+    if mappls_token and time.time() < mappls_token_expiry:
+        return mappls_token 
+
+    data = {
+        'grant_type': 'client_credentials',
+        'client_id': MAPPLS_CLIENT_ID,
+        'client_secret': MAPPLS_CLIENT_SECRET
+    }
+
+    response = requests.post(MAPPLS_TOKEN_URL, data=data)
+    if response.status_code == 200:
+        token_info = response.json()
+        mappls_token = token_info['access_token']
+        mappls_token_expiry = time.time() + token_info['expires_in'] - 60
+        return mappls_token
+    else:
+        raise Exception("Failed to fetch Mappls token: " + response.text)
 
 # Database Models
 class Driver(db.Model):
@@ -25,10 +53,9 @@ class EmergencyCase(db.Model):
     severity_level = db.Column(db.Integer, nullable=False)
     driver_id = db.Column(db.String(80), db.ForeignKey('driver.driver_id'))
 
-# Create tables
+# Create tables and add test driver
 with app.app_context():
     db.create_all()
-    # Create a test driver if none exists
     if not Driver.query.filter_by(driver_id='driver123').first():
         test_driver = Driver(
             driver_id='driver123',
@@ -80,6 +107,40 @@ def dashboard():
     
     cases = EmergencyCase.query.filter_by(driver_id=session['driver_id']).all()
     return render_template('dashboard.html', cases=cases)
+
+@app.route('/get_nearby_hospitals', methods=['POST'])
+def get_nearby_hospitals():
+    data = request.get_json()
+    latitude = data.get('latitude')
+    longitude = data.get('longitude')
+
+    if not latitude or not longitude:
+        return jsonify({'error': 'Location not provided'}), 400
+
+    try:
+        token = get_mappls_token()
+    except Exception as e:
+        print("Token fetch error:", e)
+        return jsonify({'error': str(e)}), 500
+
+    headers = {
+        "Authorization": f"bearer {token}"
+    }
+
+    url = f"https://atlas.mappls.com/api/places/nearby/json?keywords=hospital&refLocation={latitude},{longitude}"
+    try:
+        response = requests.get(url, headers=headers)
+        results = response.json()
+    except Exception as e:
+        print("Mappls API error:", e)
+        return jsonify({'error': str(e)}), 500
+
+    if 'suggestedLocations' in results:
+        hospital_names = [place['placeName'] for place in results['suggestedLocations']]
+        return jsonify({'hospitals': hospital_names})
+
+    return jsonify({'hospitals': []})
+
 
 @app.route('/logout')
 def logout():
