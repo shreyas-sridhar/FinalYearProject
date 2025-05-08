@@ -14,7 +14,9 @@
                 </div>
                 <div>
                     <label class="block text-sm font-medium mb-1">Hospital Name</label>
-                    <input type="text" name="hospital_name" class="w-full p-2 border rounded" required>
+                    <select id="hospital_name" name="hospital_name" class="w-full p-2 border rounded" required>
+                        <option value="">Fetching nearby hospitals...</option>
+                    </select>
                 </div>
                 <div>
                     <label class="block text-sm font-medium mb-1">Severity Level</label>
@@ -51,7 +53,7 @@
                         <td class="p-2">{{ case.hospital_name }}</td>
                         <td class="p-2">Level {{ case.severity_level }}</td>
                         <td class="p-2">
-                            <a href="https://www.google.com/maps/dir/?api=1&destination={{ case.hospital_name }},Bangalore"
+                            <a href="https://www.google.com/maps/dir/?api=1&destination={{ case.hospital_name }}"
                                target="_blank"
                                class="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">
                                 Navigate
@@ -65,4 +67,54 @@
         {% endif %}
     </div>
 </div>
+
+<script>
+    function getLocation() {
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(sendLocation, showError);
+        } else {
+            alert("Geolocation is not supported by this browser.");
+        }
+    }
+
+    function sendLocation(position) {
+        fetch('/get_nearby_hospitals', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                latitude: position.coords.latitude,
+                longitude: position.coords.longitude
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            let hospitalSelect = document.getElementById("hospital_name");
+            hospitalSelect.innerHTML = "";
+        
+            if (!data.hospitals || !Array.isArray(data.hospitals)) {
+                hospitalSelect.innerHTML = "<option value=''>Error fetching hospitals</option>";
+                console.error("Invalid data:", data);
+                return;
+            }
+        
+            data.hospitals.forEach(hospital => {
+                let option = document.createElement("option");
+                option.value = hospital;
+                option.textContent = hospital;
+                hospitalSelect.appendChild(option);
+            });
+        })
+        .catch(error => {
+            console.error("Fetch error:", error);
+            alert("Error fetching nearby hospitals.");
+        });        
+    }
+
+    function showError(error) {
+        console.error("Error getting location:", error);
+        alert("Unable to retrieve location. Please enable GPS.");
+    }
+
+    window.onload = getLocation;
+</script>
 {% endblock %}
