@@ -3,36 +3,9 @@ from flask_sqlalchemy import SQLAlchemy
 from passlib.hash import pbkdf2_sha256
 import requests
 import time
-
-# Mock GPIO for testing without Raspberry Pi
-class MockGPIO:
-    BCM = "BCM"
-    OUT = "OUT"
-    HIGH = True
-    LOW = False
-    
-    @staticmethod
-    def setmode(mode):
-        pass
-    
-    @staticmethod
-    def setwarnings(state):
-        pass
-    
-    @staticmethod
-    def setup(pin, mode):
-        pass
-    
-    @staticmethod
-    def output(pin, state):
-        pass
-    
-    @staticmethod
-    def cleanup():
-        pass
-
-# Use mock GPIO instead of real RPi.GPIO
-GPIO = MockGPIO()
+import threading
+from priority_level import process_case
+import RPi.GPIO as GPIO
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_secret_key_here'
@@ -40,15 +13,15 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///team.db'
 db = SQLAlchemy(app)
 
 # Mappls API credentials
-MAPPLS_CLIENT_ID = "96dHZVzsAus4KWbL-LEHP6EZXgGmw1BnAhVgiPaH2clb-UM7cNc13PnwC8ihPlM8I3e1xZY8eIYc7FmgTcGsfoIv2T9xV0jV"
-MAPPLS_CLIENT_SECRET = "lrFxI-iSEg93wYXBhCN1LDXh9pkvzTG8kPcdhkUwXIvC_wWkPT83qDpR3cTXkG68N4es96l_k9qLVKVjgVTUZgf6IWP_tjiIGTFw1GaDHh8="
+MAPPLS_CLIENT_ID = "96dHZVzsAuvFSVpQWkpAlBqJxlOMBn8VSZiNTlInPYKBPs7LUHLEEzpOavWlIGXf20CDwz-jVEYjQdNvIt0uPGbEhwHz0Q11"
+MAPPLS_CLIENT_SECRET = "lrFxI-iSEg9_rj-mSMMrBh4gfZpA7DWhYrbrjiIaSUrVH9i95cg_-3wsguHwED8P72PgFQNnykxqvLxSVkaihw4vvXxT7si4Zg151vcIgaA="
 MAPPLS_TOKEN_URL = "https://outpost.mappls.com/api/security/oauth/token"
 
 # Token cache
 mappls_token = None
 mappls_token_expiry = 0
 
-# GPIO Setup
+# GPIO Setup (uncommented for Raspberry Pi)
 GPIO.setmode(GPIO.BCM)
 GPIO.setwarnings(False)
 ALERT_PIN = 18
@@ -110,14 +83,6 @@ with app.app_context():
         db.session.add(test_driver)
         db.session.commit()
 
-# Mock Priority System API calls
-def mock_priority_api_call(endpoint, data=None, method='POST'):
-    if endpoint == '/pending_case':
-        return {'status': 'success', 'message': 'Case submitted to priority system'}
-    elif endpoint == '/pending_cases':
-        return {'pending_cases': []}
-    return {'status': 'success'}
-
 # Routes
 @app.route('/')
 def home():
@@ -163,17 +128,28 @@ def dashboard():
 
             # Send to priority system
             try:
-                mock_priority_api_call('/pending_case', {
-                    "case_id": new_case.id,
-                    "patient_name": new_case.patient_name,
-                    "hospital_name": new_case.hospital_name,
-                    "trauma_level": severity
-                })
-                
-                new_case.submitted_to_priority = True
-                db.session.commit()
-                flash('Emergency case submitted! Please scan RFID tag to activate priority.', 'info')
-                    
+                response = requests.post(
+                    f"{PRIORITY_API_URL}/pending_case",
+                    json={
+                        "case_id": new_case.id,
+                        "patient_name": new_case.patient_name,
+                        "hospital_name": new_case.hospital_name,
+                        "trauma_level": severity
+                    },
+                    timeout=10
+                )
+                if response.status_code == 200:
+                    new_case.submitted_to_priority = True
+                    db.session.commit()
+                    flash('Emergency case submitted! Please scan RFID tag to activate priority.', 'info')
+                else:
+                    flash('Case saved but priority system returned an error.', 'warning')
+
+                threading.Thread(
+                    target=process_case,
+                    args=(new_case.id, severity),
+                    daemon=True
+                ).start()
             except Exception as e:
                 flash('Case saved but priority system is offline.', 'warning')
 
@@ -191,44 +167,13 @@ def dashboard():
     # Get cases and their RFID link status
     cases = EmergencyCase.query.filter_by(driver_id=session['driver_id']).all()
     
-    # Check RFID link status for each case
-    for case in cases:
-        if case.submitted_to_priority and not case.rfid_linked:
-            try:
-                mock_response = mock_priority_api_call('/pending_cases', method='GET')
-                pending_cases = mock_response.get('pending_cases', [])
-                case_still_pending = any(p.get('case_id') == case.id for p in pending_cases)
-                
-                # Simulate RFID linking after some time
-                if not case_still_pending:
-                    case.rfid_linked = True
-                    db.session.commit()
-            except Exception:
-                pass
-    
     return render_template('dashboard.html', cases=cases)
 
 @app.route('/check_rfid_status/<int:case_id>')
 def check_rfid_status(case_id):
     case = EmergencyCase.query.get_or_404(case_id)
     
-    try:
-        mock_response = mock_priority_api_call('/pending_cases', method='GET')
-        pending_cases = mock_response.get('pending_cases', [])
-        is_pending = any(p.get('case_id') == case_id for p in pending_cases)
-        
-        # Simulate RFID linking for testing
-        import random
-        if not is_pending and case.submitted_to_priority and not case.rfid_linked:
-            if random.choice([True, False]):
-                case.rfid_linked = True
-                db.session.commit()
-                return jsonify({"status": "linked", "rfid_linked": True})
-        
-        return jsonify({"status": "pending" if not case.rfid_linked else "linked", "rfid_linked": case.rfid_linked})
-        
-    except Exception:
-        return jsonify({"status": "unknown", "rfid_linked": case.rfid_linked})
+    return jsonify({"status": "unknown", "rfid_linked": case.rfid_linked})
 
 @app.route('/get_nearby_hospitals', methods=['POST'])
 def get_nearby_hospitals():
@@ -501,7 +446,6 @@ def test_page():
     """
 
 import atexit
-
 @atexit.register
 def cleanup_gpio():
     GPIO.cleanup()
