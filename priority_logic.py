@@ -244,26 +244,48 @@ def get_pending_cases():
 # ----------------- Database Functions ------------------
 
 def log_to_database(rfid_number, severity, patient_name=None, hospital_name=None, case_id=None):
-    conn = sqlite3.connect("emergency_log.db")
+    conn = sqlite3.connect("team.db")
     c = conn.cursor()
-    
-    # Create enhanced table structure
-    c.execute('''CREATE TABLE IF NOT EXISTS emergency_log (
+    # Ensure EmergencyCase table exists (should already exist from app.py)
+    c.execute('''CREATE TABLE IF NOT EXISTS emergency_case (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        case_id INTEGER,
-        rfid_number TEXT NOT NULL,
-        patient_name TEXT,
-        hospital_name TEXT,
-        trauma_level INTEGER NOT NULL,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        patient_name TEXT NOT NULL,
+        hospital_name TEXT NOT NULL,
+        severity_level INTEGER NOT NULL,
+        driver_id TEXT,
+        rfid_number TEXT,
+        rfid_linked BOOLEAN DEFAULT 0,
+        submitted_to_priority BOOLEAN DEFAULT 0
     )''')
-    
-    c.execute("""INSERT INTO emergency_log 
-                 (case_id, rfid_number, patient_name, hospital_name, trauma_level) 
-                 VALUES (?, ?, ?, ?, ?)""",
-              (case_id, rfid_number, patient_name, hospital_name, severity))
+    # Update the case with RFID info if case_id is provided
+    if case_id is not None:
+        c.execute("UPDATE emergency_case SET rfid_number=?, rfid_linked=1 WHERE id=?", (rfid_number, case_id))
+    else:
+        # Insert a new case if not present (for backward compatibility)
+        c.execute("""INSERT INTO emergency_case (patient_name, hospital_name, severity_level, rfid_number, rfid_linked) VALUES (?, ?, ?, ?, 1)""",
+                  (patient_name or '', hospital_name or '', severity, rfid_number))
     conn.commit()
     conn.close()
+
+# Poll for new emergencies from the shared DB and add to queue if not processed
+
+def poll_new_emergencies(manager, poll_interval=2):
+    print("🔄 Starting DB poller for new emergencies (team.db)...")
+    while True:
+        conn = sqlite3.connect("team.db")
+        c = conn.cursor()
+        # Only select cases not yet submitted to priority and with RFID linked
+        c.execute("SELECT id, rfid_number, severity_level, patient_name, hospital_name FROM emergency_case WHERE submitted_to_priority=0 AND rfid_linked=1 ORDER BY id ASC")
+        rows = c.fetchall()
+        for row in rows:
+            db_id, rfid_number, trauma_level, patient_name, hospital_name = row
+            manager.add_emergency(rfid_number, trauma_level)
+            print(f"🆕 [DB] Added: {rfid_number} (Trauma {trauma_level}) from team.db")
+            # Mark as submitted to priority
+            c.execute("UPDATE emergency_case SET submitted_to_priority=1 WHERE id=?", (db_id,))
+        conn.commit()
+        conn.close()
+        time.sleep(poll_interval)
 
 # ----------------- RFID Listener (Multi-Reader) ------------------
 
@@ -353,6 +375,9 @@ def process_case(case_id, severity_level):
 
 if __name__ == "__main__":
     try:
+        # Start DB poller thread
+        db_poller_thread = threading.Thread(target=poll_new_emergencies, args=(manager,), daemon=True)
+        db_poller_thread.start()
         # Start multi-reader RFID listener
         rfid_thread = threading.Thread(target=rfid_listener_multi, daemon=True)
         rfid_thread.start()
