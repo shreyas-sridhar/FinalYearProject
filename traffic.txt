@@ -1,58 +1,87 @@
 import RPi.GPIO as GPIO
-from mfrc522 import MFRC522  # Use the lower-level MFRC522 class
+from mfrc522 import MFRC522  # For SPI-based RFID reader (RFID2)
+import serial
 import time
 import threading
 from datetime import datetime
 
-# GPIO Setup
+# GPIO setup
 GPIO.setmode(GPIO.BOARD)
 GPIO.setwarnings(False)
 
-# LED Pins (Physical Pin Numbers)
+# Define LED pins as per your connections
 LEDs = {
     "Signal1": {
-        "Red": 11,    # Pin 11 (GPIO17)
-        "Yellow": 13, # Pin 13 (GPIO27)
-        "Green": 15,  # Pin 15 (GPIO22)
-        "White": 29   # Pin 29 (GPIO5)
+        "Red": 5,
+        "Yellow": 12,
+        "Green": 3,
+        "White": 40
     },
     "Signal2": {
-        "Red": 31,    # Pin 31 (GPIO6)
-        "Yellow": 33, # Pin 33 (GPIO13)
-        "Green": 35,  # Pin 35 (GPIO19)
-        "White": 37   # Pin 37 (GPIO26)
+        "Red": 13,
+        "Yellow": 38,
+        "Green": 15,
+        "White": 16
     }
 }
 
-# Initialize LEDs
-for sig in LEDs.values():
-    for pin in sig.values():
+# Setup LED pins
+for signal in LEDs.values():
+    for pin in signal.values():
         GPIO.setup(pin, GPIO.OUT)
         GPIO.output(pin, GPIO.LOW)
 
-# RFID Readers with Explicit SPI Device Selection
-reader1 = MFRC522(bus=0, device=0)  # CE0
-reader2 = MFRC522(bus=0, device=1)  # CE1
+# Setup RFID2 (MFRC522) via SPI CE1
+reader2 = MFRC522(bus=0, device=1)
 
-# Global Variables
+# Setup RFID1 via Arduino Serial (/dev/ttyUSB0)
+try:
+    serial_rfid1 = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
+    time.sleep(2)  # wait for Arduino reset
+except Exception as e:
+    print("Failed to connect to Arduino:", e)
+    serial_rfid1 = None
+
+# Shared state
 paused = False
 interrupted_signal = None
 interrupted_time = 0
 shutdown = False
 lock = threading.Lock()
 
-# RFID Thread Function
-def rfid_listener(reader, signal_name):
+# RFID1 Listener from Arduino
+def arduino_rfid_listener():
     global paused, interrupted_signal, interrupted_time, shutdown
-    try:
-        while not shutdown:
+    while not shutdown and serial_rfid1:
+        try:
+            if serial_rfid1.in_waiting > 0:
+                data = serial_rfid1.readline().decode('utf-8').strip()
+                if data:
+                    with lock:
+                        print(f"[{datetime.now()}] Signal1 RFID from Arduino: {data}")
+                        paused = True
+                        interrupted_signal = "Signal1"
+                        interrupted_time = time.time()
+                        for color in ["Red", "Yellow", "Green"]:
+                            GPIO.output(LEDs["Signal1"][color], GPIO.LOW)
+                            GPIO.output(LEDs["Signal2"][color], GPIO.LOW)
+                        GPIO.output(LEDs["Signal1"]["White"], GPIO.HIGH)
+            time.sleep(0.1)
+        except Exception as e:
+            print("Arduino RFID Error:", e)
+
+# RFID2 Listener from MFRC522
+def mfrc_rfid_listener(reader, signal_name):
+    global paused, interrupted_signal, interrupted_time, shutdown
+    while not shutdown:
+        try:
             (status, _) = reader.MFRC522_Request(reader.PICC_REQIDL)
             if status == reader.MI_OK:
                 (status, uid) = reader.MFRC522_Anticoll()
                 if status == reader.MI_OK:
                     id = int.from_bytes(bytes(uid), "big")
                     with lock:
-                        print(f"[{datetime.now()}] {signal_name} detected RFID: {id}")
+                        print(f"[{datetime.now()}] {signal_name} RFID detected: {id}")
                         paused = True
                         interrupted_signal = signal_name
                         interrupted_time = time.time()
@@ -61,46 +90,42 @@ def rfid_listener(reader, signal_name):
                             GPIO.output(LEDs["Signal2"][color], GPIO.LOW)
                         GPIO.output(LEDs[signal_name]["White"], GPIO.HIGH)
             time.sleep(0.1)
-    except Exception as e:
-        print(f"RFID Error on {signal_name}: {e}")
+        except Exception as e:
+            print(f"{signal_name} RFID Error:", e)
 
-# Traffic Light Controller
+# Traffic Light Logic
 def traffic_light_controller():
     global paused, interrupted_signal, interrupted_time, shutdown
     current_signal = "Signal1"
     last_state = {"Signal1": "Red", "Signal2": "Red"}
-    try:
-        while not shutdown:
-            if not paused:
-                new_state = {"Signal1": "Red", "Signal2": "Red"}
-                new_state[current_signal] = "Green"
-                for sig in ["Signal1", "Signal2"]:
-                    if new_state[sig] != last_state[sig]:
-                        print(f"[{datetime.now()}] {sig}: {last_state[sig]} → {new_state[sig]}")
-                        last_state[sig] = new_state[sig]
-                for sig in ["Signal1", "Signal2"]:
-                    GPIO.output(LEDs[sig]["Red"], GPIO.HIGH if new_state[sig] == "Red" else GPIO.LOW)
-                    GPIO.output(LEDs[sig]["Green"], GPIO.HIGH if new_state[sig] == "Green" else GPIO.LOW)
-                    GPIO.output(LEDs[sig]["Yellow"], GPIO.LOW)
-                time.sleep(5)
-                GPIO.output(LEDs[current_signal]["Green"], GPIO.LOW)
-                GPIO.output(LEDs[current_signal]["Yellow"], GPIO.HIGH)
-                time.sleep(2)
-                current_signal = "Signal2" if current_signal == "Signal1" else "Signal1"
-            else:
-                with lock:
-                    if time.time() - interrupted_time >= 10:
-                        paused = False
-                        GPIO.output(LEDs["Signal1"]["White"], GPIO.LOW)
-                        GPIO.output(LEDs["Signal2"]["White"], GPIO.LOW)
-                        GPIO.output(LEDs["Signal1"]["Red"], GPIO.HIGH)
-                        GPIO.output(LEDs["Signal2"]["Red"], GPIO.HIGH)
-                        last_state = {"Signal1": "Red", "Signal2": "Red"}
-            time.sleep(0.1)
-    except KeyboardInterrupt:
-        pass
+    while not shutdown:
+        if not paused:
+            new_state = {"Signal1": "Red", "Signal2": "Red"}
+            new_state[current_signal] = "Green"
+            for sig in ["Signal1", "Signal2"]:
+                if new_state[sig] != last_state[sig]:
+                    print(f"[{datetime.now()}] {sig}: {last_state[sig]} → {new_state[sig]}")
+                    last_state[sig] = new_state[sig]
+            for sig in ["Signal1", "Signal2"]:
+                GPIO.output(LEDs[sig]["Red"], new_state[sig] == "Red")
+                GPIO.output(LEDs[sig]["Green"], new_state[sig] == "Green")
+                GPIO.output(LEDs[sig]["Yellow"], GPIO.LOW)
+            time.sleep(5)
+            GPIO.output(LEDs[current_signal]["Green"], GPIO.LOW)
+            GPIO.output(LEDs[current_signal]["Yellow"], GPIO.HIGH)
+            time.sleep(2)
+            current_signal = "Signal2" if current_signal == "Signal1" else "Signal1"
+        else:
+            with lock:
+                if time.time() - interrupted_time >= 10:
+                    paused = False
+                    for sig in ["Signal1", "Signal2"]:
+                        GPIO.output(LEDs[sig]["White"], GPIO.LOW)
+                        GPIO.output(LEDs[sig]["Red"], GPIO.HIGH)
+                    last_state = {"Signal1": "Red", "Signal2": "Red"}
+        time.sleep(0.1)
 
-# Stop Listener
+# Stop listener
 def stop_listener():
     global shutdown
     while True:
@@ -109,20 +134,18 @@ def stop_listener():
             shutdown = True
             break
 
-# Start Threads
-thread1 = threading.Thread(target=rfid_listener, args=(reader1, "Signal1"))
-thread2 = threading.Thread(target=rfid_listener, args=(reader2, "Signal2"))
-thread3 = threading.Thread(target=traffic_light_controller)
-thread4 = threading.Thread(target=stop_listener)
+# Launch all threads
+threading.Thread(target=arduino_rfid_listener).start()
+threading.Thread(target=mfrc_rfid_listener, args=(reader2, "Signal2")).start()
+threading.Thread(target=traffic_light_controller).start()
+threading.Thread(target=stop_listener).start()
 
-thread1.start()
-thread2.start()
-thread3.start()
-thread4.start()
-
+# Main loop to keep program alive
 try:
     while not shutdown:
         time.sleep(1)
 finally:
     GPIO.cleanup()
-    print("Program stopped. GPIO cleaned up.")
+    if serial_rfid1:
+        serial_rfid1.close()
+    print("Program stopped and GPIO cleaned up.")
