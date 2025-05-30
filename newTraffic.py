@@ -1,6 +1,6 @@
 import serial
 import RPi.GPIO as GPIO
-from mfrc522 import MFRC522
+
 import time
 import threading
 from datetime import datetime
@@ -31,12 +31,8 @@ for sig in LEDs.values():
         GPIO.setup(pin, GPIO.OUT)
         GPIO.output(pin, GPIO.LOW)
 
-# RFID Readers
-reader2 = MFRC522(bus=0, device=1)
 
-# Serial setup for Arduino (RFID1)
-arduino_serial = serial.Serial('/dev/ttyUSB0', 9600, timeout=1)
-time.sleep(2)
+
 
 # Global Variables
 paused = False
@@ -50,21 +46,29 @@ def rfid_listener_arduino():
     global paused, interrupted_signal, interrupted_time, shutdown
     try:
         while not shutdown:
-            if arduino_serial.in_waiting > 0:
-                data = arduino_serial.readline().decode('utf-8').strip()
+            #print('check nano ')
+            f=open('rfid1.txt','r')
+            data=f.read()
+            f.close()
+            #print('rfid_id 1', data)
+            
+            with lock:
                 if data:
-                    with lock:
-                        print("[", datetime.now(), "] Signal1 detected RFID from Arduino: " + str(data))
-                        print("(" + str(data) + " scanned giving green corridor)")
-                        paused = True
-                        interrupted_signal = "Signal1"
-                        interrupted_time = time.time()
+                    print("[", datetime.now(), "] Signal1 detected RFID from Arduino: " + str(data))
+                    print("(" + str(data) + " scanned giving green corridor)")
+                    paused = True
+                    interrupted_signal = "Signal1"
+                    interrupted_time = time.time()
 
-                        for color in ["Red", "Yellow", "Green", "White"]:
-                            GPIO.output(LEDs["Signal1"][color], GPIO.LOW)
-                            GPIO.output(LEDs["Signal2"][color], GPIO.LOW)
+                    for color in ["Red", "Yellow", "Green", "White"]:
+                        GPIO.output(LEDs["Signal1"][color], GPIO.LOW)
+                        GPIO.output(LEDs["Signal2"][color], GPIO.LOW)
 
                         GPIO.output(LEDs["Signal1"]["White"], GPIO.HIGH)
+                    f=open('rfid1.txt','w')
+                    f.write('')
+                    f.close()
+                    
             time.sleep(0.1)
     except Exception as e:
         print("Arduino RFID Error: " + str(e))
@@ -74,23 +78,27 @@ def rfid_listener_mfrc():
     global paused, interrupted_signal, interrupted_time, shutdown
     try:
         while not shutdown:
-            (status, _) = reader2.MFRC522_Request(reader2.PICC_REQIDL)
-            if status == reader2.MI_OK:
-                (status, uid) = reader2.MFRC522_Anticoll()
-                if status == reader2.MI_OK:
-                    rfid_id = int.from_bytes(bytes(uid), "big")
-                    with lock:
-                        print("[", datetime.now(), "] Signal2 detected RFID: " + str(rfid_id))
-                        print("(" + str(rfid_id) + " scanned giving green corridor)")
-                        paused = True
-                        interrupted_signal = "Signal2"
-                        interrupted_time = time.time()
-
-                        for color in ["Red", "Yellow", "Green", "White"]:
-                            GPIO.output(LEDs["Signal1"][color], GPIO.LOW)
-                            GPIO.output(LEDs["Signal2"][color], GPIO.LOW)
+            
+            f=open('rfid2.txt','r')
+            rfid_id=f.read()
+            f.close()
+            #print('rfid_id 2', rfid_id)
+            with lock:
+                if rfid_id!='':
+                    print("[", datetime.now(), "] Signal2 detected RFID: " + str(rfid_id))
+                    print("(" + str(rfid_id) + " scanned giving green corridor)")
+                    paused = True
+                    interrupted_signal = "Signal2"
+                    interrupted_time = time.time()
+                    for color in ["Red", "Yellow", "Green", "White"]:
+                        GPIO.output(LEDs["Signal1"][color], GPIO.LOW)
+                        GPIO.output(LEDs["Signal2"][color], GPIO.LOW)
 
                         GPIO.output(LEDs["Signal2"]["White"], GPIO.HIGH)
+                    f=open('rfid2.txt','w')
+                    f.write('')
+                    f.close()
+                    
             time.sleep(0.1)
     except Exception as e:
         print("MFRC522 RFID Error: " + str(e))
