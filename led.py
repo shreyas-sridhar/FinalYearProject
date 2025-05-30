@@ -54,11 +54,14 @@ def normal_cycle():
     time.sleep(2)
     GPIO.output(LEDs["Signal2"]["Green"],GPIO.LOW)
     time.sleep(2)
+    GPIO.output(LEDs["Signal2"]["White"],GPIO.HIGH)
+    time.sleep(2)
+    GPIO.output(LEDs["Signal2"]["White"],GPIO.LOW)
 normal_cycle()
 '''
-GPIO.output(LEDs["Signal2"]["Yellow"],GPIO.HIGH)
+GPIO.output(LEDs["Signal1"]["Red"],GPIO.HIGH)
 time.sleep(2)
-GPIO.output(LEDs["Signal2"]["Yellow"],GPIO.LOW)
+GPIO.output(LEDs["Signal1"]["Red"],GPIO.LOW)
 time.sleep(2)
 
 
