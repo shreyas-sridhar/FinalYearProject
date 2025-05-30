@@ -1,6 +1,6 @@
+import serial
 import RPi.GPIO as GPIO
 from mfrc522 import MFRC522
-import serial
 import time
 import threading
 from datetime import datetime
@@ -54,7 +54,7 @@ def rfid_listener_arduino():
                 data = arduino_serial.readline().decode('utf-8').strip()
                 if data:
                     with lock:
-                        print(f"[{datetime.now()}] Signal1 detected RFID from Arduino: {data}")
+                        print("[",datetime.now()," Signal1 detected RFID from Arduino:",data)
                         paused = True
                         interrupted_signal = "Signal1"
                         interrupted_time = time.time()
@@ -64,7 +64,7 @@ def rfid_listener_arduino():
                         GPIO.output(LEDs["Signal1"]["White"], GPIO.HIGH)
             time.sleep(0.1)
     except Exception as e:
-        print(f"Arduino RFID Error: {e}")
+        print("Arduino RFID Error: ",e)
 
 # RFID Listener for MFRC522
 def rfid_listener_mfrc():
@@ -77,7 +77,7 @@ def rfid_listener_mfrc():
                 if status == reader2.MI_OK:
                     id = int.from_bytes(bytes(uid), "big")
                     with lock:
-                        print(f"[{datetime.now()}] Signal2 detected RFID: {id}")
+                        print("[",datetime.now(), " Signal2 detected RFID: ", id)
                         paused = True
                         interrupted_signal = "Signal2"
                         interrupted_time = time.time()
@@ -87,7 +87,7 @@ def rfid_listener_mfrc():
                         GPIO.output(LEDs["Signal2"]["White"], GPIO.HIGH)
             time.sleep(0.1)
     except Exception as e:
-        print(f"MFRC522 RFID Error: {e}")
+        print("MFRC522 RFID Error: ",e)
 
 # Traffic Light Controller
 def traffic_light_controller():
@@ -101,7 +101,7 @@ def traffic_light_controller():
                 new_state[current_signal] = "Green"
                 for sig in ["Signal1", "Signal2"]:
                     if new_state[sig] != last_state[sig]:
-                        print(f"[{datetime.now()}] {sig}: {last_state[sig]} → {new_state[sig]}")
+                        print("[",datetime.now(), ' ',sig , ': ',last_state[sig], ' ->', new_state[sig])
                         last_state[sig] = new_state[sig]
                 for sig in ["Signal1", "Signal2"]:
                     GPIO.output(LEDs[sig]["Red"], GPIO.HIGH if new_state[sig] == "Red" else GPIO.LOW)
