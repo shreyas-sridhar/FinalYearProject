@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h2>Emergency Case Submission</h2>
+
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <div class="alert alert-info">
+          {% for message in messages %}
+            <p>{{ message }}</p>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <form method="POST" action="{{ url_for('submit_case') }}">
+        <div class="form-group">
+            <label>Patient Name:</label>
+            <input type="text" class="form-control" name="patient_name" required>
+        </div>
+
+        <div class="form-group">
+            <label>Severity Level:</label>
+            <select class="form-control" name="severity" required>
+                <option value="1">1 - Low</option>
+                <option value="2">2 - Medium</option>
+                <option value="3">3 - High</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label>Signal:</label>
+            <select class="form-control" name="signal" required>
+                <option value="Signal 1">Signal 1 (Arduino)</option>
+                <option value="Signal 2">Signal 2 (Raspberry Pi)</option>
+            </select>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Submit Case</button>
+    </form>
+</div>
+{% endblock %}
