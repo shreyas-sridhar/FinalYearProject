@@ -73,8 +73,8 @@ A smart traffic signal system that detects emergency vehicles using RFID and dyn
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/etps.git
-cd etps
+git clone https://github.com/shreyas-sridhar/The-Emergency-Traffic-Prioritization-System.git
+cd The-Emergency-Traffic-Prioritization-System
 ````
 
 ### 2. Install Dependencies
@@ -103,7 +103,7 @@ sudo raspi-config
 ### 4. Run the App
 
 ```bash
-cd etps
+cd The-Emergency-Traffic-Prioritization-System
 python3 app.py
 ```
 
