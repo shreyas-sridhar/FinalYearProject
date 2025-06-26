@@ -175,8 +175,3 @@ gpio readall
 *Made with ❤️ in Bengaluru*
 
 ```
-
----
-
-Let me know once you've uploaded it to GitHub — I can also help you set up a `LICENSE`, `.gitignore`, or even convert this into a GitHub Pages site if you'd like.
-```
