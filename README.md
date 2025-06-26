@@ -1,4 +1,3 @@
-````markdown
 # 🚨 Emergency Traffic Prioritization System (ETPS)
 
 A smart traffic signal system that detects emergency vehicles using RFID and dynamically alters traffic lights to prioritize their passage. Built with **Raspberry Pi**, **Arduino Nano**, **Python**, **SQLite**, and **Flask**, this system integrates **dual RFID readers**, a **web dashboard**, and **GPIO-based light controls**.
